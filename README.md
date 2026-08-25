@@ -37,7 +37,24 @@ Coverage % is a pure ratio, so it is price-level independent; only the dollar de
 when you change the discount inputs. If you do not update `$retailDiscount` and `$spd` to
 your own numbers, the savings dollars will be wrong.
 
-## How to run
+## Quick one-shot (no PowerPoint, no business-unit mapping)
+For a hands-off run that just answers "should we buy a savings plan and by how much,"
+use the standalone script. It needs only the top of `Config.ps1` (tenant, period,
+`$retailDiscount`, `$spd`) and produces a per-subscription CSV plus a console rollup:
+
+```powershell
+Connect-AzAccount -Tenant <your-tenant-guid>
+.\Analyze-SavingsPlanAuto.ps1     -> SavingsPlanAutoAnalysis.csv
+```
+
+For each subscription it: (1) reads Azure's Compute Savings Plan recommendation, (2) grosses
+the recommended baseline up to LIST price via `$retailDiscount`, (3) prices the steady/covered
+portion at the published savings-plan rate plus `$spd` (32.5%), leaving the burst portion at
+full list, then (4) verifies whether that beats the current negotiated rate and labels each
+subscription accordingly. The numbered scripts below add VM-hours, an all-subscription audit,
+and the full PowerPoint deck.
+
+## How to run (full deck)
 
 ### Step 0 - Connect to your Azure tenant (read access is enough)
 ```powershell
