@@ -1,0 +1,10 @@
+# Generated analysis outputs (contain customer/tenant-specific data - never commit)
+*.csv
+*.pptx
+*.png
+
+# Local / editor
+.vscode/
+*.log
+Thumbs.db
+.DS_Store
