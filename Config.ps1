@@ -31,8 +31,10 @@ $priorSubsCsv = ''
 #  $retailDiscount : your current negotiated discount off public list (e.g. 0.40 = 40% off).
 #  $spd            : the additional savings-plan discount your agreement adds on top,
 #                    applied to the covered/steady portion (e.g. 0.325 = 32.5%).
-#  $standardSp1/3  : Microsoft published Compute Savings Plan discounts off list.
-#                    These are public list values and normally do NOT change.
+#  $standardSp1/3  : FALLBACK published Compute Savings Plan discounts off list.
+#                    Analyze-SavingsPlanAuto.ps1 derives the standard SP rate LIVE from each
+#                    subscription's Cost Management recommendation; these constants are used only
+#                    when a subscription/term has no usable recommendation.
 #
 #  Model (multiplicative, off public PAYG list):
 #    publicRetail    = current40Spend / (1 - retailDiscount)
@@ -45,8 +47,8 @@ $priorSubsCsv = ''
 # ============================================================================
 $retailDiscount = 0.40    # <<< YOUR negotiated discount off list (sample: 0.40)
 $spd            = 0.325   # <<< YOUR additional savings-plan discount (sample: 0.325)
-$standardSp1    = 0.322   # published 1-year Compute Savings Plan discount off list
-$standardSp3    = 0.528   # published 3-year Compute Savings Plan discount off list
+$standardSp1    = 0.322   # FALLBACK 1-year Compute Savings Plan discount off list (auto script derives this live)
+$standardSp3    = 0.528   # FALLBACK 3-year Compute Savings Plan discount off list (auto script derives this live)
 
 # ============================================================================
 #  BUSINESS UNITS  (fill in after you can see your subscription names)
