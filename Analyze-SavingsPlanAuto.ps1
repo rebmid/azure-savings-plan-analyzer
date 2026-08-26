@@ -1,8 +1,8 @@
 # Auto savings-plan analysis - runs end to end from Config.ps1 alone (no BU mapping, no PowerPoint).
 # For every subscription it: reads Azure's Compute Savings Plan recommendation (the same data the
 # Advisor / Cost blade surfaces), grosses the recommended baseline up to LIST price using the
-# negotiated discount, prices the covered/steady portion at the savings-plan rate DERIVED LIVE from
-# that recommendation PLUS the 32.5% deal discount (both stacked off list), leaves the uncovered/burst
+# negotiated discount, prices the covered/steady portion at Azure's own recommended savings-plan cost
+# (benefitCost, which already reflects the negotiated savings-plan pricing), leaves the uncovered/burst
 # portion at full list (the on-demand discount is forfeited on a plan), then verifies whether that
 # beats staying on the current negotiated rate. -> SavingsPlanAutoAnalysis.csv
 $folder = $PSScriptRoot
@@ -27,17 +27,12 @@ function Get-CoverageShare($d, $costNoBenefit) {
     return [math]::Max(0.0, [math]::Min(1.0, $cov))
 }
 
-# Standard SP discount off list, derived live from Azure's own recommendation. benefitCost is the SP cost
-# of the covered portion; covered-at-list = coverage * listMonthly, so the discount = 1 - benefitCost/covered-at-list.
-# Falls back to the Config constant only when the recommendation has no usable benefit figure.
-function Get-LiveSpRate($d, $coverage, $listMonthly, $fallback) {
+# Covered-portion savings-plan cost. Prefer Azure's own recommended benefitCost (already reflects the
+# negotiated savings-plan pricing for this usage); fall back to the published-rate model only if missing.
+function Get-CoveredSpCost($d, $coverage, $listMonthly, $fallbackSp, $spd) {
     $bc = [double]$d.benefitCost
-    $coveredList = $coverage * $listMonthly
-    if ($coveredList -gt 0 -and $bc -gt 0) {
-        $rate = 1 - ($bc / $coveredList)
-        if ($rate -gt 0 -and $rate -lt 0.9) { return $rate }
-    }
-    return $fallback
+    if ($bc -gt 0) { return $bc }
+    return $coverage * $listMonthly * (1 - $fallbackSp) * (1 - $spd)
 }
 
 $subs = Get-AzSubscription -TenantId $tenant -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Enabled' } | Sort-Object Name
@@ -57,24 +52,28 @@ $results = foreach ($s in $subs) {
     # Step 1: turn the recommended baseline into LIST price by removing the negotiated discount.
     $listMonthly = $currentMonthly / (1 - $retailDiscount)
 
-    # Live standard SP rate off list, derived per term from Azure's own recommendation (benefitCost).
-    # $standardSp1/$standardSp3 in Config.ps1 are fallbacks used only when a term has no usable recommendation.
-    $std3 = Get-LiveSpRate $d3 $coverage $listMonthly $standardSp3
+    # Step 2/3: covered/steady portion is priced at Azure's own recommended savings-plan cost
+    # (benefitCost already reflects the negotiated savings-plan pricing); uncovered/burst pays full list.
+    # $standardSp*/$spd are used only as a fallback when a term has no usable benefitCost.
+    $covered3 = Get-CoveredSpCost $d3 $coverage $listMonthly $standardSp3 $spd
+    $threeYearMonthly = $covered3 + ((1 - $coverage) * $listMonthly)
+
     $rec1 = Get-SpRecommendation $s.Id 'P1Y'
-    $std1 = if ($rec1) {
-        $d1    = $rec1.properties.recommendationDetails
-        $curr1 = [double]$rec1.properties.costWithoutBenefit
-        $list1 = if ($curr1 -gt 0) { $curr1 / (1 - $retailDiscount) } else { $listMonthly }
-        Get-LiveSpRate $d1 (Get-CoverageShare $d1 $curr1) $list1 $standardSp1
-    } else { $standardSp1 }
+    if ($rec1) {
+        $d1       = $rec1.properties.recommendationDetails
+        $curr1    = [double]$rec1.properties.costWithoutBenefit
+        $cov1     = Get-CoverageShare $d1 $curr1
+        $list1    = if ($curr1 -gt 0) { $curr1 / (1 - $retailDiscount) } else { $listMonthly }
+        $covered1 = Get-CoveredSpCost $d1 $cov1 $list1 $standardSp1 $spd
+        $oneYearMonthly = $covered1 + ((1 - $cov1) * $list1)
+    } else {
+        $covered1 = $coverage * $listMonthly * (1 - $standardSp1) * (1 - $spd)
+        $oneYearMonthly = $covered1 + ((1 - $coverage) * $listMonthly)
+    }
 
-    # Covered-portion price factors off list: live SP rate AND the 32.5% deal discount, multiplicative.
-    $sp3Factor = (1 - $std3) * (1 - $spd)
-    $sp1Factor = (1 - $std1) * (1 - $spd)
-
-    # Step 2/3: price the plan off list - covered portion gets SP rate + 32.5%; uncovered pays full list.
-    $threeYearMonthly = $listMonthly * (($coverage * $sp3Factor) + (1 - $coverage))
-    $oneYearMonthly   = $listMonthly * (($coverage * $sp1Factor) + (1 - $coverage))
+    # Effective discount off list on the covered portion (live; already includes the deal) - for transparency.
+    $coveredList3    = $coverage * $listMonthly
+    $covered3OffList = if ($coveredList3 -gt 0) { 1 - ($covered3 / $coveredList3) } else { 0 }
 
     # Step 4: verify against the current negotiated (40%) spend.
     $annual3 = ($currentMonthly - $threeYearMonthly) * 12
@@ -87,11 +86,10 @@ $results = foreach ($s in $subs) {
         CurrentNegMonthly  = [math]::Round($currentMonthly, 0)
         ListMonthly        = [math]::Round($listMonthly, 0)
         SteadyCoveragePct  = [math]::Round($coverage * 100, 0)
-        Std1RatePct        = [math]::Round($std1 * 100, 1)
-        Std3RatePct        = [math]::Round($std3 * 100, 1)
+        Covered3OffListPct = [math]::Round($covered3OffList * 100, 1)
         OneYearSpMonthly   = [math]::Round($oneYearMonthly, 0)
         ThreeYearSpMonthly = [math]::Round($threeYearMonthly, 0)
-        Commit3PerHour     = [math]::Round(($coverage * $listMonthly * $sp3Factor) / 730, 2)
+        Commit3PerHour     = [math]::Round([double]$d3.commitmentAmount, 2)
         AnnualSavings1yr   = [math]::Round($annual1, 0)
         AnnualSavings3yr   = [math]::Round($annual3, 0)
         Recommendation     = $verdict
@@ -108,7 +106,7 @@ $totalThree = ($results | Measure-Object ThreeYearSpMonthly -Sum).Sum
 $estAnnual  = ($results | Measure-Object AnnualSavings3yr   -Sum).Sum
 
 Write-Host ""
-Write-Host ("Model: current negotiated rate = {0:P0} off list; savings plan priced off list at the live per-estate SP rate (from Azure's recommendation) + {1:P1} deal discount (both stacked)." -f $retailDiscount, $spd) -ForegroundColor DarkGray
+Write-Host ("Model: current negotiated rate = {0:P0} off list; covered portion priced at Azure's own recommended savings-plan cost (benefitCost), uncovered at full list." -f $retailDiscount) -ForegroundColor DarkGray
 $results | Format-Table Subscription,
     @{n='Current(neg)/mo';e={'{0:N0}' -f $_.CurrentNegMonthly}},
     @{n='List/mo';e={'{0:N0}' -f $_.ListMonthly}},

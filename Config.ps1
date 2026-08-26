@@ -32,8 +32,8 @@ $priorSubsCsv = ''
 #  $spd            : the additional savings-plan discount your agreement adds on top,
 #                    applied to the covered/steady portion (e.g. 0.325 = 32.5%).
 #  $standardSp1/3  : FALLBACK published Compute Savings Plan discounts off list.
-#                    Analyze-SavingsPlanAuto.ps1 derives the standard SP rate LIVE from each
-#                    subscription's Cost Management recommendation; these constants are used only
+#                    Analyze-SavingsPlanAuto.ps1 prices the covered portion from each subscription's
+#                    live Cost Management recommendation (benefitCost); these constants are used only
 #                    when a subscription/term has no usable recommendation.
 #
 #  Model (multiplicative, off public PAYG list):
